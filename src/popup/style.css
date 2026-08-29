@@ -24,14 +24,18 @@ body {
   margin: 0;
   padding: 0;
   width: 420px;
-  min-height: 240px;
+  height: 580px;
   max-height: 580px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
   font-family: 'Segoe UI', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   background: var(--bg);
   color: var(--text);
 }
 
 .header {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -87,6 +91,7 @@ body {
 }
 
 .tip {
+  flex-shrink: 0;
   margin: 12px 12px 8px;
   padding: 10px 12px;
   background: var(--tip-bg);
@@ -98,10 +103,13 @@ body {
 }
 
 .list {
+  flex: 1 1 auto;
+  min-height: 0;
   padding: 0 0 8px;
+  overflow-x: hidden;
   overflow-y: auto;
-  max-height: 440px;
   background: #fff;
+  -webkit-overflow-scrolling: touch;
 }
 
 .empty {
@@ -366,11 +374,15 @@ body {
 }
 
 .footer {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
-  padding: 12px 16px 14px;
+  align-items: center;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
   border-top: 1px solid var(--border);
   background: #fff;
+  box-shadow: 0 -6px 16px rgba(17, 24, 39, 0.06);
+  z-index: 5;
 }
 
 .linkish {
