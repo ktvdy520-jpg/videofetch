@@ -16,6 +16,12 @@ import { DEFAULT_IG_APP_ID } from '../shared/ig-shortcode';
 
 /** Latest x-ig-app-id seen on Instagram requests (competitors reuse this). */
 let igAppId = DEFAULT_IG_APP_ID;
+/** Latest fb_dtsg_ag from Facebook video/ajax requests (Qooly/4saved). */
+let fbDtsg: string | undefined;
+
+/** Public Twitter web bearer (same family as common downloaders / Qooly). */
+const TWITTER_BEARER =
+  'AAAAAAAAAAAAAAAAAAAAAPYXBAAAAAAACLXUNDekMxqa8h%2F40K4moUkGsoc%3DTYfbDKbT3jJPCEVnMYqilB28NHfOPqkca3qaAxGfsyKCs0wRbw';
 
 chrome.webRequest.onBeforeSendHeaders.addListener(
   (details) => {
@@ -28,6 +34,26 @@ chrome.webRequest.onBeforeSendHeaders.addListener(
     }
   },
   { urls: ['*://*.instagram.com/*', '*://instagram.com/*'] },
+  ['requestHeaders'],
+);
+
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    try {
+      const token = new URL(details.url).searchParams.get('fb_dtsg_ag');
+      if (token && token !== fbDtsg) fbDtsg = token;
+    } catch {
+      /* ignore */
+    }
+  },
+  {
+    urls: [
+      '*://*.facebook.com/video/video_data_async/*',
+      '*://*.facebook.com/ajax/*',
+      '*://facebook.com/video/video_data_async/*',
+      '*://facebook.com/ajax/*',
+    ],
+  },
   ['requestHeaders'],
 );
 
@@ -426,6 +452,90 @@ async function openDownload(media: CapturedMedia): Promise<BgResponse> {
   return { ok: true };
 }
 
+/** Qooly: api.twitter.com conversation timeline → mp4 variants (highest first). */
+async function fetchTwitterVideoLinks(
+  tweetId: string,
+  csrfToken?: string,
+): Promise<PageMediaLink[]> {
+  const url = new URL(`https://api.twitter.com/2/timeline/conversation/${tweetId}.json`);
+  const params: Record<string, string> = {
+    include_profile_interstitial_type: '1',
+    include_blocking: '1',
+    include_blocked_by: '1',
+    include_followed_by: '1',
+    include_want_retweets: '1',
+    include_mute_edge: '1',
+    include_can_dm: '1',
+    include_can_media_tag: '1',
+    skip_status: '1',
+    cards_platform: 'Web-12',
+    include_cards: '1',
+    include_composer_source: 'true',
+    include_ext_alt_text: 'true',
+    include_reply_count: '1',
+    tweet_mode: 'extended',
+    include_entities: 'true',
+    include_user_entities: 'true',
+    include_ext_media_color: 'true',
+    include_ext_media_availability: 'true',
+    send_error_codes: 'true',
+    simple_quoted_tweets: 'true',
+    count: '20',
+    ext: 'mediaStats,highlightedLabel,cameraMoment',
+  };
+  for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
+
+  const headers: Record<string, string> = {
+    Authorization: `Bearer ${TWITTER_BEARER}`,
+  };
+  if (csrfToken) headers['x-csrf-token'] = csrfToken;
+
+  const res = await fetch(url.href, { method: 'GET', headers, credentials: 'omit' });
+  if (!res.ok) return [];
+  const data = (await res.json()) as {
+    globalObjects?: {
+      tweets?: Record<
+        string,
+        {
+          full_text?: string;
+          extended_entities?: {
+            media?: Array<{
+              video_info?: {
+                variants?: Array<{ content_type?: string; url?: string; bitrate?: number }>;
+              };
+            }>;
+          };
+        }
+      >;
+    };
+  };
+
+  const tweet = data.globalObjects?.tweets?.[tweetId];
+  const variants = tweet?.extended_entities?.media?.[0]?.video_info?.variants || [];
+  const title = (tweet?.full_text || 'twitter video').slice(0, 80);
+  const mp4s = variants
+    .filter((v) => v.url && v.content_type?.includes('mp4'))
+    .map((v) => {
+      const m = v.url!.match(/(\d{3,4})x(\d{3,4})/);
+      const width = m ? Number(m[1]) : undefined;
+      const height = m ? Number(m[2]) : undefined;
+      return {
+        url: normalizeMediaUrl(v.url!),
+        title,
+        kind: 'mp4' as const,
+        width,
+        height,
+        bitrate: v.bitrate || 0,
+      };
+    })
+    .sort((a, b) => (b.width || 0) - (a.width || 0) || b.bitrate - a.bitrate);
+
+  // Prefer single best quality (page-parser list replaces on each push).
+  const best = mp4s[0];
+  if (!best) return [];
+  return [{ url: best.url, title: best.title, kind: best.kind, width: best.width, height: best.height }];
+}
+
 chrome.runtime.onMessage.addListener((message: BgMessage, sender, sendResponse) => {
   if (message.type === 'ADD_PAGE_MEDIA') {
     const tabId = sender.tab?.id;
@@ -461,6 +571,26 @@ chrome.runtime.onMessage.addListener((message: BgMessage, sender, sendResponse) 
   if (message.type === 'GET_IG_APP_ID') {
     sendResponse({ ok: true, appId: igAppId } satisfies BgResponse);
     return false;
+  }
+
+  if (message.type === 'GET_FB_DTSG') {
+    sendResponse({ ok: true, dtsg: fbDtsg } satisfies BgResponse);
+    return false;
+  }
+
+  if (message.type === 'GET_TWITTER_VIDEO') {
+    void (async () => {
+      try {
+        const links = await fetchTwitterVideoLinks(message.tweetId, message.csrfToken);
+        sendResponse({ ok: true, links } satisfies BgResponse);
+      } catch (err) {
+        sendResponse({
+          ok: false,
+          error: err instanceof Error ? err.message : 'twitter fetch failed',
+        } satisfies BgResponse);
+      }
+    })();
+    return true;
   }
 
   if (message.type === 'RESYNC_TAB') {

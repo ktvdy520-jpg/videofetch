@@ -47,7 +47,11 @@ export type BgMessage =
   /** Content noticed SPA navigation (href changed). */
   | { type: 'PAGE_NAVIGATED' }
   /** Instagram content script asks for captured x-ig-app-id. */
-  | { type: 'GET_IG_APP_ID' };
+  | { type: 'GET_IG_APP_ID' }
+  /** Facebook content script asks for captured fb_dtsg_ag. */
+  | { type: 'GET_FB_DTSG' }
+  /** Twitter/X: resolve tweet video variants via background API. */
+  | { type: 'GET_TWITTER_VIDEO'; tweetId: string; csrfToken?: string };
 
 /** Background → content scripts */
 export type ContentMessage = { type: 'RESET_PAGE_SCAN' };
@@ -58,5 +62,7 @@ export type ExtEvent = { type: 'MEDIA_LIST_CHANGED'; tabId: number };
 export type BgResponse =
   | { ok: true; items: CapturedMedia[] }
   | { ok: true; appId?: string }
+  | { ok: true; dtsg?: string }
+  | { ok: true; links: PageMediaLink[] }
   | { ok: true }
   | { ok: false; error: string };

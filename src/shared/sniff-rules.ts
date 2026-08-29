@@ -2,7 +2,7 @@
  * Sniff policy aligned with Qooly-style architecture:
  * - Progressive MP4/webm: allowlist only (not every CDN hit)
  * - M3U8: global, with initiator/url ignore list
- * - Site-specific pages (e.g. Instagram): content scripts, not blanket MP4 sniff
+ * - Site-specific pages: content scripts, not blanket MP4 sniff
  */
 
 /** Progressive file capture only when request URL host matches one of these. */
@@ -38,11 +38,35 @@ export const NETWORK_IGNORE_HOST_REGEX: readonly RegExp[] = [
 export const PAGE_PARSER_HOSTS: readonly string[] = [
   'instagram.com',
   'cdninstagram.com',
+  'tiktok.com',
+  'facebook.com',
+  'fb.com',
+  'twitter.com',
+  'x.com',
+  'bilibili.com',
+  'dailymotion.com',
+  'vk.com',
+  'vkvideo.ru',
+  'ixigua.com',
+  '928hd.tv',
+  'showhd9.com',
 ];
 
 /** Generic video / og:video content script should not run here. */
 export const GENERIC_CONTENT_SKIP_HOSTS: readonly string[] = [
   'instagram.com',
+  'tiktok.com',
+  'facebook.com',
+  'fb.com',
+  'twitter.com',
+  'x.com',
+  'bilibili.com',
+  'dailymotion.com',
+  'vk.com',
+  'vkvideo.ru',
+  'ixigua.com',
+  '928hd.tv',
+  'showhd9.com',
   'youtube.com',
   'youtu.be',
   'googlevideo.com',
@@ -86,7 +110,71 @@ export function shouldSkipGenericContentScript(): boolean {
   return GENERIC_CONTENT_SKIP_HOSTS.some((n) => host === n || host.endsWith(`.${n}`));
 }
 
+function pageHost(): string {
+  return location.hostname.toLowerCase();
+}
+
 export function isInstagramPage(): boolean {
-  const host = location.hostname.toLowerCase();
+  const host = pageHost();
   return host === 'instagram.com' || host.endsWith('.instagram.com');
+}
+
+export function isTikTokPage(): boolean {
+  const host = pageHost();
+  return host === 'tiktok.com' || host.endsWith('.tiktok.com');
+}
+
+export function isFacebookPage(): boolean {
+  const host = pageHost();
+  return (
+    host === 'facebook.com' ||
+    host.endsWith('.facebook.com') ||
+    host === 'fb.com' ||
+    host.endsWith('.fb.com')
+  );
+}
+
+export function isTwitterPage(): boolean {
+  const host = pageHost();
+  return (
+    host === 'twitter.com' ||
+    host.endsWith('.twitter.com') ||
+    host === 'x.com' ||
+    host.endsWith('.x.com')
+  );
+}
+
+export function isBilibiliPage(): boolean {
+  const host = pageHost();
+  return host === 'bilibili.com' || host.endsWith('.bilibili.com');
+}
+
+export function isDailymotionPage(): boolean {
+  const host = pageHost();
+  return host === 'dailymotion.com' || host.endsWith('.dailymotion.com');
+}
+
+export function isVkPage(): boolean {
+  const host = pageHost();
+  return (
+    host === 'vk.com' ||
+    host.endsWith('.vk.com') ||
+    host === 'vkvideo.ru' ||
+    host.endsWith('.vkvideo.ru')
+  );
+}
+
+export function isIxiguaPage(): boolean {
+  const host = pageHost();
+  return host === 'ixigua.com' || host.endsWith('.ixigua.com');
+}
+
+export function isNicheHlsPage(): boolean {
+  const host = pageHost();
+  return (
+    host === '928hd.tv' ||
+    host.endsWith('.928hd.tv') ||
+    host === 'showhd9.com' ||
+    host.endsWith('.showhd9.com')
+  );
 }
