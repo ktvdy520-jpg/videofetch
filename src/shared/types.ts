@@ -45,12 +45,15 @@ export type BgMessage =
   /** Clear tab + ask content scripts to rescan current page. */
   | { type: 'RESYNC_TAB'; tabId: number }
   /** Content noticed SPA navigation (href changed). */
-  | { type: 'PAGE_NAVIGATED' };
+  | { type: 'PAGE_NAVIGATED' }
+  /** Instagram content script asks for captured x-ig-app-id. */
+  | { type: 'GET_IG_APP_ID' };
 
 /** Background → content scripts */
 export type ContentMessage = { type: 'RESET_PAGE_SCAN' };
 
 export type BgResponse =
   | { ok: true; items: CapturedMedia[] }
+  | { ok: true; appId?: string }
   | { ok: true }
   | { ok: false; error: string };

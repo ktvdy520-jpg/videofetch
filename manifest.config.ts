@@ -24,6 +24,12 @@ export default defineManifest({
   content_scripts: [
     {
       matches: ['*://*.instagram.com/*', '*://instagram.com/*'],
+      js: ['src/content/instagram-main.ts'],
+      run_at: 'document_start',
+      world: 'MAIN',
+    },
+    {
+      matches: ['*://*.instagram.com/*', '*://instagram.com/*'],
       js: ['src/content/instagram.ts'],
       run_at: 'document_idle',
     },

@@ -1,22 +1,19 @@
 import { isInstagramPage } from '../shared/sniff-rules';
+import { DEFAULT_IG_APP_ID, shortcodeToMediaId } from '../shared/ig-shortcode';
+import { IG_URL_CHANGE_EVENT } from '../shared/ig-video-versions';
 import { kindFromUrl, pushPageLinks } from './page-media';
 import { onResetPageScan, watchSpaNavigation } from './scan-lifecycle';
 import type { PageMediaLink } from '../shared/types';
 import { normalizeMediaUrl } from '../shared/media';
 
-const SEEN = new Set<string>();
-const MARK = 'tubebox-ig-scanned';
-
 /** Instagram uses both /reel/ and /reels/ (and p/tv/stories). */
 const IG_MEDIA_PATH = /\/(?:reels?|p|tv|stories)\/([^/?#]+)/i;
 const IG_MEDIA_PATH_TEST = /\/(?:reels?|p|tv|stories)\//i;
 
-interface IgHit {
-  code?: string;
-  url: string;
-  width?: number;
-  height?: number;
-}
+/** shortcode → already fetched this session (cleared on reset). */
+const fetched = new Set<string>();
+let navGeneration = 0;
+let cachedAppId = DEFAULT_IG_APP_ID;
 
 function currentShortcode(): string | null {
   const m = location.pathname.match(IG_MEDIA_PATH);
@@ -33,167 +30,175 @@ function displayTitle(shortcode: string | null): string {
   return shortcode ? `instagram-${shortcode}` : 'instagram';
 }
 
-/** Collect video_versions[0] with nearest code/shortcode (Qooly-style, filtered). */
-function collectHits(obj: unknown, inheritedCode?: string, out: IgHit[] = []): IgHit[] {
-  if (obj == null || typeof obj !== 'object') return out;
-  if (Array.isArray(obj)) {
-    for (const item of obj) collectHits(item, inheritedCode, out);
-    return out;
-  }
-  const rec = obj as Record<string, unknown>;
-  const code =
-    (typeof rec.code === 'string' && rec.code) ||
-    (typeof rec.shortcode === 'string' && rec.shortcode) ||
-    inheritedCode;
-
-  const versions = rec.video_versions;
-  if (Array.isArray(versions) && versions.length) {
-    const first = versions[0] as { url?: string; width?: number; height?: number };
-    if (first?.url && typeof first.url === 'string') {
-      out.push({
-        code,
-        url: first.url,
-        width: typeof first.width === 'number' ? first.width : undefined,
-        height: typeof first.height === 'number' ? first.height : undefined,
-      });
-    }
-  }
-
-  for (const k of Object.keys(rec)) {
-    if (k === 'video_versions') continue;
-    collectHits(rec[k], code, out);
-  }
-  return out;
-}
-
-function playingVideoUrl(): string | null {
-  const videos = Array.from(document.querySelectorAll('video'));
-  const playing = videos.find((v) => !v.paused && !v.ended && (v.currentSrc || v.src));
-  const pick = playing || videos.find((v) => !!(v.currentSrc || v.src));
-  const url = pick?.currentSrc || pick?.src || null;
-  return url && /^https?:\/\//i.test(url) ? url : null;
-}
-
-function urlsLooselyEqual(a: string, b: string): boolean {
-  try {
-    const na = normalizeMediaUrl(a);
-    const nb = normalizeMediaUrl(b);
-    if (na === nb) return true;
-    const pa = new URL(na).pathname;
-    const pb = new URL(nb).pathname;
-    return !!pa && pa === pb;
-  } catch {
-    return a === b;
-  }
-}
-
 function resetState(): void {
-  SEEN.clear();
-  document.querySelectorAll('.' + MARK).forEach((el) => el.classList.remove(MARK));
+  fetched.clear();
 }
 
-function collectFromPage(): PageMediaLink[] {
-  const shortcode = currentShortcode();
-  const title = displayTitle(shortcode);
-  const hits: IgHit[] = [];
+async function resolveAppId(): Promise<string> {
+  try {
+    const res = (await chrome.runtime.sendMessage({ type: 'GET_IG_APP_ID' })) as {
+      ok?: boolean;
+      appId?: string;
+    };
+    if (res?.ok && res.appId) {
+      cachedAppId = res.appId;
+      return res.appId;
+    }
+  } catch {
+    /* ignore */
+  }
+  return cachedAppId;
+}
 
-  const scripts = Array.from(
-    document.querySelectorAll('script[type="application/json"], script:not([src])'),
-  );
-  for (const el of scripts) {
-    const text = el.textContent || '';
-    if (!text.includes('video_versions')) continue;
-    let data: unknown;
+function linkFromVersion(
+  shortcode: string,
+  url: string,
+  width?: number,
+  height?: number,
+  title?: string,
+): PageMediaLink {
+  return {
+    url: normalizeMediaUrl(url),
+    title: title || displayTitle(shortcode),
+    kind: kindFromUrl(url),
+    width,
+    height,
+  };
+}
+
+/** 4saved/Qooly: GET /api/v1/media/{pk}/info/ */
+async function fetchViaMediaInfo(shortcode: string, appId: string): Promise<PageMediaLink | null> {
+  const mediaId = shortcodeToMediaId(shortcode);
+  if (!mediaId || mediaId === '0') return null;
+
+  const res = await fetch(`https://www.instagram.com/api/v1/media/${mediaId}/info/`, {
+    credentials: 'include',
+    headers: {
+      'x-requested-with': 'XMLHttpRequest',
+      'x-ig-app-id': appId,
+    },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    items?: Array<{
+      code?: string;
+      caption?: { text?: string; text_translation?: string };
+      video_versions?: Array<{ url?: string; width?: number; height?: number }>;
+    }>;
+  };
+  const item = data.items?.[0];
+  const ver = item?.video_versions?.[0];
+  if (!ver?.url || !/^https?:\/\//i.test(ver.url)) return null;
+  const title =
+    item?.caption?.text_translation ||
+    item?.caption?.text ||
+    displayTitle(item?.code || shortcode);
+  return linkFromVersion(shortcode, ver.url, ver.width, ver.height, title);
+}
+
+/** Fallback GraphQL shortcode query (same hash family as common downloaders). */
+async function fetchViaGraphql(shortcode: string, appId: string): Promise<PageMediaLink | null> {
+  const variables = encodeURIComponent(JSON.stringify({ shortcode }));
+  const url =
+    `https://www.instagram.com/graphql/query/?query_hash=55a3c4bad29e4e20c20ff4cdfd80f5b4&variables=${variables}`;
+  const res = await fetch(url, {
+    credentials: 'include',
+    headers: {
+      'x-requested-with': 'XMLHttpRequest',
+      'x-ig-app-id': appId,
+    },
+  });
+  if (!res.ok) return null;
+  const data = (await res.json()) as {
+    data?: {
+      shortcode_media?: {
+        video_url?: string;
+        edge_sidecar_to_children?: {
+          edges?: Array<{ node?: { video_url?: string } }>;
+        };
+      };
+    };
+  };
+  const media = data.data?.shortcode_media;
+  const videoUrl = media?.video_url;
+  if (videoUrl && /^https?:\/\//i.test(videoUrl)) {
+    return linkFromVersion(shortcode, videoUrl);
+  }
+  const side = media?.edge_sidecar_to_children?.edges?.[0]?.node?.video_url;
+  if (side && /^https?:\/\//i.test(side)) {
+    return linkFromVersion(shortcode, side);
+  }
+  return null;
+}
+
+async function fetchReelByShortcode(shortcode: string): Promise<void> {
+  if (!shortcode || shortcode === '#' || shortcode === 'audio') return;
+  if (fetched.has(shortcode)) return;
+  fetched.add(shortcode);
+
+  const gen = navGeneration;
+  const appId = await resolveAppId();
+
+  let link: PageMediaLink | null = null;
+  try {
+    link = await fetchViaMediaInfo(shortcode, appId);
+  } catch {
+    /* try fallback */
+  }
+  if (!link) {
     try {
-      data = JSON.parse(text);
+      link = await fetchViaGraphql(shortcode, appId);
     } catch {
-      continue;
-    }
-    el.classList.add(MARK);
-    collectHits(data, undefined, hits);
-  }
-
-  let chosen: IgHit[] = hits;
-
-  if (shortcode) {
-    const matched = hits.filter((h) => h.code === shortcode);
-    if (matched.length) chosen = matched;
-  }
-
-  const playing = playingVideoUrl();
-  if (playing) {
-    const byPlay = chosen.filter((h) => urlsLooselyEqual(h.url, playing));
-    if (byPlay.length) {
-      chosen = byPlay;
-    } else if (isSingleMediaRoute() && (!chosen.length || chosen.length > 1)) {
-      chosen = [{ url: playing }];
+      /* ignore */
     }
   }
 
-  const links: PageMediaLink[] = [];
-  for (const hit of chosen) {
-    const url = normalizeMediaUrl(hit.url);
-    if (!url || SEEN.has(url)) continue;
-    SEEN.add(url);
-    links.push({
-      url,
-      title,
-      kind: kindFromUrl(url),
-      width: hit.width,
-      height: hit.height,
-    });
+  if (gen !== navGeneration) return;
+  if (currentShortcode() !== shortcode) return;
+  if (!link) {
+    // Allow retry on next scan if API failed (login wall / rate limit).
+    fetched.delete(shortcode);
+    return;
   }
-
-  if (!links.length && isSingleMediaRoute() && playing) {
-    const url = normalizeMediaUrl(playing);
-    if (!SEEN.has(url)) {
-      SEEN.add(url);
-      links.push({ url, title, kind: 'mp4' });
-    }
-  }
-
-  if (isSingleMediaRoute() && links.length > 1) {
-    return links.slice(0, 1);
-  }
-
-  return links;
+  pushPageLinks([link]);
 }
 
-function scan(): void {
-  if (!isInstagramPage()) return;
-  const links = collectFromPage();
-  if (links.length) pushPageLinks(links);
-}
-
-/** Clear + scan now, then retry after player src catches up. */
+/** Address-bar driven: clear session cache and pull current reel via official media API. */
 function resetAndScan(): void {
+  navGeneration += 1;
   resetState();
-  scan();
-  setTimeout(() => {
-    resetState();
-    scan();
-  }, 600);
-  setTimeout(() => {
-    resetState();
-    scan();
-  }, 1500);
+  const code = currentShortcode();
+  if (code && isSingleMediaRoute()) {
+    void fetchReelByShortcode(code);
+    return;
+  }
 }
 
-let scanQueued = false;
-function scheduleScan(): void {
-  if (scanQueued) return;
-  scanQueued = true;
-  setTimeout(() => {
-    scanQueued = false;
-    scan();
-  }, 800);
+function softScan(): void {
+  const code = currentShortcode();
+  if (code && isSingleMediaRoute()) {
+    void fetchReelByShortcode(code);
+  }
 }
 
 if (isInstagramPage()) {
   onResetPageScan(resetState, resetAndScan);
-  watchSpaNavigation(resetAndScan);
-  scan();
-  setInterval(scan, 7000);
-  document.addEventListener('scroll', scheduleScan, { passive: true });
-  document.addEventListener('wheel', scheduleScan, { passive: true });
+  watchSpaNavigation(resetAndScan, { pageEventName: IG_URL_CHANGE_EVENT });
+
+  // postMessage bridge from MAIN history hook (more reliable than CustomEvent alone).
+  window.addEventListener('message', (ev: MessageEvent) => {
+    const data = ev.data;
+    if (!data || data.source !== 'tubebox-ig') return;
+    if (data.type === IG_URL_CHANGE_EVENT) resetAndScan();
+  });
+
+  softScan();
+  setInterval(softScan, 5000);
+  document.addEventListener(
+    'scroll',
+    () => {
+      softScan();
+    },
+    { passive: true },
+  );
 }

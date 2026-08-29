@@ -12,6 +12,24 @@ import {
   isMp4NetworkAllowed,
   isPageParserSite,
 } from '../shared/sniff-rules';
+import { DEFAULT_IG_APP_ID } from '../shared/ig-shortcode';
+
+/** Latest x-ig-app-id seen on Instagram requests (competitors reuse this). */
+let igAppId = DEFAULT_IG_APP_ID;
+
+chrome.webRequest.onBeforeSendHeaders.addListener(
+  (details) => {
+    const headers = details.requestHeaders || [];
+    for (const h of headers) {
+      if (h.name.toLowerCase() === 'x-ig-app-id' && h.value) {
+        igAppId = h.value;
+        break;
+      }
+    }
+  },
+  { urls: ['*://*.instagram.com/*', '*://instagram.com/*'] },
+  ['requestHeaders'],
+);
 
 /** tabId -> media id -> item */
 const tabMedia = new Map<number, Map<string, CapturedMedia>>();
@@ -425,6 +443,11 @@ chrome.runtime.onMessage.addListener((message: BgMessage, sender, sendResponse) 
       void clearTabMedia(tabId);
     }
     sendResponse({ ok: true } satisfies BgResponse);
+    return false;
+  }
+
+  if (message.type === 'GET_IG_APP_ID') {
+    sendResponse({ ok: true, appId: igAppId } satisfies BgResponse);
     return false;
   }
 
