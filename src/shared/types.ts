@@ -52,6 +52,9 @@ export type BgMessage =
 /** Background → content scripts */
 export type ContentMessage = { type: 'RESET_PAGE_SCAN' };
 
+/** Background → open popup (and any other extension pages). */
+export type ExtEvent = { type: 'MEDIA_LIST_CHANGED'; tabId: number };
+
 export type BgResponse =
   | { ok: true; items: CapturedMedia[] }
   | { ok: true; appId?: string }

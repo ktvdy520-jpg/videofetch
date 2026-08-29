@@ -1,5 +1,5 @@
 import Hls from 'hls.js';
-import type { CapturedMedia } from '../shared/types';
+import type { CapturedMedia, ExtEvent } from '../shared/types';
 import { formatBytes, kindLabel, listBadge } from '../shared/media';
 import { isYouTubeRelatedUrl } from '../shared/youtube';
 
@@ -278,6 +278,26 @@ document.getElementById('clear')!.addEventListener('click', async () => {
 });
 
 window.addEventListener('unload', () => destroyPreviewPlayer());
+
+/** Keep popup in sync while user scrolls / new media is sniffed. */
+let reloadTimer: ReturnType<typeof setTimeout> | null = null;
+function scheduleReload(): void {
+  if (reloadTimer) clearTimeout(reloadTimer);
+  reloadTimer = setTimeout(() => {
+    reloadTimer = null;
+    void load();
+  }, 200);
+}
+
+chrome.runtime.onMessage.addListener((message: ExtEvent) => {
+  if (message?.type !== 'MEDIA_LIST_CHANGED') return;
+  void (async () => {
+    const tabId = await activeTabId();
+    if (tabId == null) return;
+    if (message.tabId !== tabId) return;
+    scheduleReload();
+  })();
+});
 
 void load();
 // Master playlist enrichment is async — refresh list shortly after open.

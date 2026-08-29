@@ -90,6 +90,18 @@ async function updateBadge(tabId: number): Promise<void> {
   } catch {
     /* tab may be gone */
   }
+  notifyListChanged(tabId);
+}
+
+/** Tell an open popup to reload the sniff list (no-op if popup closed). */
+function notifyListChanged(tabId: number): void {
+  try {
+    chrome.runtime.sendMessage({ type: 'MEDIA_LIST_CHANGED', tabId }, () => {
+      void chrome.runtime.lastError;
+    });
+  } catch {
+    /* ignore */
+  }
 }
 
 function parseContentLength(header?: string): number | undefined {
