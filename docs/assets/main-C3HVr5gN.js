@@ -1,0 +1,2 @@
+import"./modulepreload-polyfill-B5Qt9EMX.js";const m=document.getElementById("goForm"),u=document.getElementById("urlInput"),r=document.getElementById("typeInput");m.addEventListener("submit",n=>{n.preventDefault();const t=u.value.trim();if(!t)return;const e=r.value==="mp4"?"mp4":"m3u8",o=new URLSearchParams({url:t,type:e,title:"video"});location.href=`./dl.html?${o.toString()}`});
+//# sourceMappingURL=main-C3HVr5gN.js.map

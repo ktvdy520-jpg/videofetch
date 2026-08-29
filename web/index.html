@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TubeBox - 浏览器内 M3U8 转 MP4 / 视频下载</title>
+    <meta
+      name="description"
+      content="TubeBox 在浏览器本地将 M3U8 转为 MP4，支持扩展嗅探跳转下载。不上传服务器转码。"
+    />
+    <link rel="stylesheet" href="./src/home.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="./index.html">TubeBox</a>
+      <nav>
+        <a href="./dl.html">M3U8 转 MP4</a>
+        <a href="https://github.com/ktvdy520-jpg/videofetch" target="_blank" rel="noreferrer"
+          >Chrome 扩展</a
+        >
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero">
+        <h1>文件转换器</h1>
+        <p class="lead">在浏览器中即时转换常见格式。处理在本地完成，不上传到服务器。</p>
+      </section>
+
+      <section class="drop card">
+        <h2>粘贴 M3U8 / MP4 链接</h2>
+        <p class="muted">或使用 TubeBox 扩展在网页上嗅探后一键跳转到本页。</p>
+        <form id="goForm" class="go-form">
+          <input
+            id="urlInput"
+            type="url"
+            placeholder="https://example.com/video.m3u8"
+            required
+          />
+          <select id="typeInput">
+            <option value="m3u8">M3U8 → MP4</option>
+            <option value="mp4">MP4 下载</option>
+          </select>
+          <button type="submit" class="btn primary">开始</button>
+        </form>
+      </section>
+
+      <section class="grid">
+        <article class="card feature">
+          <h3>M3U8 转 MP4</h3>
+          <p>解析播放列表、分段下载，并用 mux.js 在本地转封装为 MP4。</p>
+          <a class="link" href="./dl.html">打开转换页 →</a>
+        </article>
+        <article class="card feature">
+          <h3>Chrome 扩展</h3>
+          <p>嗅探页面媒体、预览清晰度，点击下载跳转到本站保存。</p>
+          <a class="link" href="https://github.com/ktvdy520-jpg/videofetch" target="_blank" rel="noreferrer"
+            >获取扩展 →</a
+          >
+        </article>
+        <article class="card feature">
+          <h3>隐私优先</h3>
+          <p>转换与下载在你的设备完成，官方站不托管、不转码你的视频文件。</p>
+        </article>
+      </section>
+
+      <section class="why card">
+        <h2>为什么选择 TubeBox？</h2>
+        <ul>
+          <li>浏览器本地处理，速度快、更私密</li>
+          <li>支持 M3U8 / HLS 与 MP4 直链</li>
+          <li>与 TubeBox 扩展配合：嗅探 → 跳转 → 点保存</li>
+          <li>完全免费，无需注册</li>
+        </ul>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div>© TubeBox · GitHub Pages</div>
+      <a href="https://github.com/ktvdy520-jpg/videofetch">源码</a>
+    </footer>
+
+    <script type="module" src="./src/home.ts"></script>
+  </body>
+</html>

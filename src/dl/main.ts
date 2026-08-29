@@ -49,7 +49,7 @@ function offerDownload(blob: Blob, filename: string): void {
   saveLink.download = filename;
   saveLink.classList.remove('hidden');
   saveLink.textContent = `保存 ${filename}`;
-  saveLink.click();
+  // Do not auto-click — user must click Save (same as official web page).
 }
 
 function resolveUrl(base: string, ref: string): string {

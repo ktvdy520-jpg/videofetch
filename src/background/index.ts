@@ -1,7 +1,7 @@
 import type { BgMessage, BgResponse, CapturedMedia } from '../shared/types';
 import { detectMediaKind, mediaId } from '../shared/media';
 import { isYouTubeRelatedUrl } from '../shared/youtube';
-import { buildDlPageUrl } from '../shared/dl-url';
+import { buildWebDlPageUrl, DEFAULT_WEB_DL_URL } from '../shared/dl-url';
 import {
   formatResolutionLabel,
   guessResolutionFromUrl,
@@ -286,28 +286,16 @@ async function openDownload(media: CapturedMedia): Promise<BgResponse> {
     return { ok: false, error: '不支持 YouTube 相关链接' };
   }
 
-  const localBase = chrome.runtime.getURL('').replace(/\/$/, '');
-  let finalUrl = buildDlPageUrl(media, localBase);
-
+  let pageBase = DEFAULT_WEB_DL_URL;
   try {
     const data = await chrome.storage.sync.get('downloadBaseUrl');
     const custom = typeof data.downloadBaseUrl === 'string' ? data.downloadBaseUrl.trim() : '';
-    if (custom) {
-      const params = new URL(finalUrl).searchParams;
-      if (/\.html($|\?)/i.test(custom)) {
-        const u = new URL(custom);
-        params.forEach((v, k) => u.searchParams.set(k, v));
-        finalUrl = u.toString();
-      } else {
-        const u = new URL(custom.endsWith('/') ? custom : `${custom}/`);
-        params.forEach((v, k) => u.searchParams.set(k, v));
-        finalUrl = u.toString();
-      }
-    }
+    if (custom) pageBase = custom;
   } catch {
-    /* keep local */
+    /* keep default GitHub Pages */
   }
 
+  const finalUrl = buildWebDlPageUrl(media, pageBase);
   await chrome.tabs.create({ url: finalUrl });
   return { ok: true };
 }

@@ -131,7 +131,7 @@ function render(items: CapturedMedia[]): void {
   }
 
   tipEl.textContent =
-    '有些视频如果不播放可能无法被捕获。点左侧播放可预览，点下载保存到本地。';
+    '有些视频如果不播放可能无法被捕获。点左侧播放可预览，点下载将跳转到 TubeBox 官网转换页，需再点「保存」才会下载。';
 
   for (const item of items) {
     const wrap = document.createElement('div');

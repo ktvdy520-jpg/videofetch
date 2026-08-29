@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>M3U8 转 MP4 - TubeBox</title>
+    <link rel="stylesheet" href="./src/dl.css" />
+  </head>
+  <body>
+    <header class="nav">
+      <a class="brand" href="./index.html">TubeBox</a>
+      <nav>
+        <a href="./index.html">首页</a>
+        <a href="https://github.com/ktvdy520-jpg/videofetch" target="_blank" rel="noreferrer"
+          >扩展</a
+        >
+      </nav>
+    </header>
+
+    <main class="wrap">
+      <h1 id="pageTitle">M3U8 转 MP4</h1>
+      <p class="sub" id="pageSub">请稍候，转换完成后点击「保存」下载文件。</p>
+
+      <section class="card">
+        <h2 id="title">准备中…</h2>
+        <p class="meta" id="meta"></p>
+        <p class="src" id="source"></p>
+
+        <div class="progress-wrap">
+          <div class="progress-bar"><div class="progress-fill" id="fill"></div></div>
+          <div class="progress-text" id="progressText">等待开始…</div>
+        </div>
+
+        <div class="stats" id="stats"></div>
+
+        <div class="actions">
+          <button type="button" class="btn primary" id="startBtn">开始转换</button>
+          <button type="button" class="btn ghost" id="cancelBtn" disabled>取消</button>
+          <button type="button" class="btn success" id="saveBtn" disabled>保存</button>
+        </div>
+
+        <p class="note" id="note"></p>
+        <pre class="log" id="log"></pre>
+      </section>
+
+      <aside class="ad card">
+        <div class="ad-label">广告位</div>
+        <div class="ad-body">可在此放置推广横幅（占位）</div>
+      </aside>
+
+      <section class="seo card">
+        <h2>为什么要使用 M3U8 视频转换器？</h2>
+        <p>
+          M3U8 / HLS 常以分片形式播放。TubeBox 在浏览器中下载分片并转封装为 MP4，方便离线观看，无需上传到服务器。
+        </p>
+      </section>
+    </main>
+
+    <footer class="foot">
+      <div>© TubeBox · 本地转换 · 不上传服务器</div>
+    </footer>
+
+    <script type="module" src="./src/dl-page.ts"></script>
+  </body>
+</html>

@@ -5,8 +5,12 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:web": "vite --config web/vite.config.ts",
     "build": "tsc --noEmit && vite build",
+    "build:web": "vite build --config web/vite.config.ts",
+    "build:all": "npm run build && npm run build:web",
     "preview": "vite preview",
+    "preview:web": "vite preview --config web/vite.config.ts",
     "icons": "node scripts/gen-icons.mjs"
   },
   "devDependencies": {

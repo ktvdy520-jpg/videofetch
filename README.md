@@ -1,16 +1,26 @@
 # TubeBox
 
-Chrome Manifest V3 extension that sniffs MP4 / M3U8 on the current tab and opens an **in-extension** download page (`chrome-extension://…/src/dl/index.html`). No server-side ffmpeg, no upload for transcoding, and **no recording**. YouTube and related hosts are blocked.
+Chrome Manifest V3 extension + official GitHub Pages site.
 
-Brand green matches TomDown App (`#10B981`).
+- **Extension**: sniff MP4 / M3U8 on the current tab, inline preview, then open the official download page.
+- **Website**: Qooly-style converter landing + `dl.html` (M3U8 → MP4 / MP4 fetch). Processing is **local in the browser**; click **保存** to download (no auto-download).
+- No server-side ffmpeg, no recording, YouTube blocked.
+- Brand green matches TomDown App (`#10B981`).
 
-## Stack
+## Official site (GitHub Pages)
 
-- Vite + `@crxjs/vite-plugin`
-- TypeScript
-- MV3 service worker (`webRequest` sniffing)
+After enabling Pages on this repo (**Settings → Pages → Deploy from branch `main` / folder `/docs`**):
 
-## Setup
+- Home: https://ktvdy520-jpg.github.io/videofetch/
+- Download / convert: https://ktvdy520-jpg.github.io/videofetch/dl.html
+
+Build the site into `docs/`:
+
+```bash
+npm.cmd run build:web
+```
+
+## Extension setup
 
 ```bash
 cd E:\wwwroot\videofetch
@@ -19,68 +29,31 @@ npm.cmd run icons
 npm.cmd run build
 ```
 
-PowerShell may block `npm.ps1`; use `npm.cmd` as above.
-
-## Load in Chrome
+PowerShell may block `npm.ps1`; use `npm.cmd`.
 
 1. Open `chrome://extensions`
 2. Enable **Developer mode**
-3. **Load unpacked** → select the `dist` folder produced by the build
+3. **Load unpacked** → `dist`
 4. Pin TubeBox
+
+Default download jump target is the GitHub Pages `dl.html`. Override with `chrome.storage.sync.downloadBaseUrl` if needed.
 
 ## Dev
 
 ```bash
-npm.cmd run dev
+npm.cmd run dev          # extension
+npm.cmd run dev:web      # site at http://127.0.0.1:5174/videofetch/
+npm.cmd run build:all    # extension dist + docs site
 ```
 
-Load the unpacked path Vite/CRX prints (often `dist` with HMR). Keep reloading the extension after major changes.
+## Behavior
 
-## How to test
+1. Play media on a page → TubeBox captures streams (per current page only).
+2. Popup: preview / choose quality / **下载**.
+3. Opens `…/dl.html?url=…&type=m3u8|mp4` — for M3U8 the page title is **M3U8 转 MP4**.
+4. Page converts locally; **保存** starts the file download.
 
-### MP4
+## Notes
 
-1. Open a page that plays a direct MP4, e.g.  
-   `https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4`  
-   (or embed it in a simple HTML page and play)
-2. Open the popup → you should see an **MP4** row with size when Content-Length is present
-3. Click **下载** → download page shows a progress bar and saves a `.mp4`
-
-### M3U8 (HLS)
-
-1. Open a public HLS demo, e.g. Mux test stream page or playlist such as  
-   `https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8`  
-   (open in a player page so the browser requests the playlist, or navigate so sniffing sees `.m3u8`)
-2. Popup lists **M3U8** → **下载**
-3. Download page parses master/media playlist, fetches segments with progress `x / y`, concatenates:
-   - **MPEG-TS** segments → save as `.ts` (honest: not ffmpeg remux; continuous TS is widely playable)
-   - **fMP4** (`.m4s` + init) → save as `.mp4`
-
-### YouTube
-
-Any `youtube.com` / `youtu.be` / `googlevideo.com` / `ytimg` / etc. media or page is ignored / blocked.
-
-## Optional custom download host
-
-In the extension’s service worker console or via `chrome.storage.sync.set`:
-
-```js
-chrome.storage.sync.set({ downloadBaseUrl: 'https://example.com/dl/' })
-```
-
-Default remains the packaged `src/dl/index.html` (local-first, better for CORS than a random https origin).
-
-## Scripts
-
-| Command | Description |
-|--------|-------------|
-| `npm.cmd run icons` | Generate `public/icons/icon{16,48,128}.png` |
-| `npm.cmd run build` | Typecheck + production build → `dist` |
-| `npm.cmd run dev` | CRX/Vite development build |
-
-## Notes / limitations
-
-- Sniffing uses `webRequest.onHeadersReceived`; media must be requested by the tab.
-- Download uses `fetch` with `credentials: "omit"` from the extension page. Sites that require cookies or block cross-origin may still fail.
-- Concatenated TS saved as `.mp4` without remux is **not** a real MP4 container; TubeBox uses mux.js to remux TS → MP4 when possible, otherwise falls back to `.ts`.
-- No record / screen-capture feature by design.
+- GitHub Pages fetches are subject to **CORS**; public demo streams (e.g. Mux) work; some CDNs may block browser fetches.
+- MPEG-TS HLS is remuxed with **mux.js**; failure falls back to `.ts`.
