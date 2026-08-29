@@ -21,6 +21,25 @@ export default defineManifest({
   },
   permissions: ['storage', 'tabs', 'webRequest'],
   host_permissions: ['http://*/*', 'https://*/*'],
+  content_scripts: [
+    {
+      matches: ['*://*.instagram.com/*', '*://instagram.com/*'],
+      js: ['src/content/instagram.ts'],
+      run_at: 'document_idle',
+    },
+    {
+      matches: ['http://*/*', 'https://*/*'],
+      exclude_matches: [
+        '*://*.instagram.com/*',
+        '*://instagram.com/*',
+        '*://*.youtube.com/*',
+        '*://youtube.com/*',
+        '*://youtu.be/*',
+      ],
+      js: ['src/content/generic.ts'],
+      run_at: 'document_idle',
+    },
+  ],
   icons: {
     '16': 'icons/icon16.png',
     '48': 'icons/icon48.png',

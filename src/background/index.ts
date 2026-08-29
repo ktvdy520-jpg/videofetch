@@ -1,5 +1,5 @@
-import type { BgMessage, BgResponse, CapturedMedia } from '../shared/types';
-import { detectMediaKind, mediaId } from '../shared/media';
+import type { BgMessage, BgResponse, CapturedMedia, PageMediaLink } from '../shared/types';
+import { detectMediaKind, isTooSmallMedia, mediaId, normalizeMediaUrl } from '../shared/media';
 import { isYouTubeRelatedUrl } from '../shared/youtube';
 import { buildWebDlPageUrl, DEFAULT_WEB_DL_URL } from '../shared/dl-url';
 import {
@@ -7,6 +7,11 @@ import {
   guessResolutionFromUrl,
   parseHlsPlaylist,
 } from '../shared/hls-parse';
+import {
+  isIgnoredNetworkUrl,
+  isMp4NetworkAllowed,
+  isPageParserSite,
+} from '../shared/sniff-rules';
 
 /** tabId -> media id -> item */
 const tabMedia = new Map<number, Map<string, CapturedMedia>>();
@@ -75,6 +80,82 @@ function parseContentLength(header?: string): number | undefined {
   return Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
+/** Compare document pages ignoring hash (hash-only changes keep list). */
+function samePage(a: string, b: string): boolean {
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    return (
+      ua.origin === ub.origin &&
+      ua.pathname === ub.pathname &&
+      ua.search === ub.search
+    );
+  } catch {
+    return a === b;
+  }
+}
+
+function pruneStaleItems(tabId: number, pageUrl: string): void {
+  const map = tabMedia.get(tabId);
+  if (!map || !pageUrl) return;
+  for (const [id, item] of map) {
+    if (item.pageUrl && !samePage(item.pageUrl, pageUrl)) {
+      map.delete(id);
+    }
+  }
+}
+
+async function upsertMedia(
+  tabId: number,
+  partial: {
+    url: string;
+    pageUrl: string;
+    title: string;
+    kind: CapturedMedia['kind'];
+    mime?: string;
+    sizeBytes?: number;
+    width?: number;
+    height?: number;
+    label?: string;
+    source?: CapturedMedia['source'];
+    id?: string;
+    capturedAt?: number;
+  },
+): Promise<CapturedMedia> {
+  const url = normalizeMediaUrl(partial.url);
+  const map = getTabMap(tabId);
+  if (partial.pageUrl) pruneStaleItems(tabId, partial.pageUrl);
+
+  const id = partial.id ?? mediaId(tabId, url);
+  const prev = map.get(id);
+  const item: CapturedMedia = {
+    id,
+    url,
+    tabId,
+    pageUrl: partial.pageUrl,
+    title: partial.title || prev?.title || 'video',
+    kind: partial.kind,
+    mime: partial.mime ?? prev?.mime,
+    sizeBytes:
+      partial.sizeBytes != null && prev?.sizeBytes != null
+        ? Math.max(partial.sizeBytes, prev.sizeBytes)
+        : (partial.sizeBytes ?? prev?.sizeBytes),
+    width: partial.width ?? prev?.width,
+    height: partial.height ?? prev?.height,
+    capturedAt: prev?.capturedAt ?? partial.capturedAt ?? Date.now(),
+    label:
+      partial.label ??
+      (partial.height || partial.width
+        ? formatResolutionLabel(partial.width, partial.height)
+        : prev?.label) ??
+      (partial.kind === 'm3u8' ? 'M3U8' : 'MP4'),
+    source: partial.source ?? prev?.source ?? 'network',
+  };
+  map.set(id, item);
+  await updateBadge(tabId);
+  return item;
+}
+
 async function enrichM3u8Entry(seed: CapturedMedia): Promise<void> {
   const key = enrichKey(seed.tabId, seed.url);
   if (enrichedPlaylists.has(key) || enrichInFlight.has(key)) return;
@@ -96,7 +177,6 @@ async function enrichM3u8Entry(seed: CapturedMedia): Promise<void> {
 
     const map = tabMedia.get(seed.tabId);
     if (!map) return;
-    // Page may have changed while fetching.
     const still = map.get(seed.id);
     if (!still || (still.pageUrl && seed.pageUrl && !samePage(still.pageUrl, seed.pageUrl))) {
       return;
@@ -106,7 +186,7 @@ async function enrichM3u8Entry(seed: CapturedMedia): Promise<void> {
     if (parsed.isMaster && parsed.variants.length > 0) {
       map.delete(seed.id);
       for (const v of parsed.variants) {
-        if (isYouTubeRelatedUrl(v.uri)) continue;
+        if (isYouTubeRelatedUrl(v.uri) || isIgnoredNetworkUrl(v.uri)) continue;
         let width = v.width;
         let height = v.height;
         if (height == null && width == null) {
@@ -114,12 +194,12 @@ async function enrichM3u8Entry(seed: CapturedMedia): Promise<void> {
           width = g.width;
           height = g.height;
         }
-        const id = mediaId(seed.tabId, v.uri);
+        const normalized = normalizeMediaUrl(v.uri);
+        const id = mediaId(seed.tabId, normalized);
         const prev = map.get(id);
-        const label = formatResolutionLabel(width, height);
         map.set(id, {
           id,
-          url: v.uri,
+          url: normalized,
           tabId: seed.tabId,
           pageUrl: seed.pageUrl,
           title: seed.title,
@@ -129,9 +209,10 @@ async function enrichM3u8Entry(seed: CapturedMedia): Promise<void> {
           width: width ?? prev?.width,
           height: height ?? prev?.height,
           capturedAt: Date.now(),
-          label,
+          label: formatResolutionLabel(width, height),
+          source: 'network',
         });
-        enrichedPlaylists.add(enrichKey(seed.tabId, v.uri));
+        enrichedPlaylists.add(enrichKey(seed.tabId, normalized));
       }
       enrichedPlaylists.add(key);
       await updateBadge(seed.tabId);
@@ -156,13 +237,24 @@ async function enrichM3u8Entry(seed: CapturedMedia): Promise<void> {
   }
 }
 
+/**
+ * Network sniff (Qooly-aligned):
+ * - M3U8: global (minus ignore hosts)
+ * - Progressive MP4/webm: allowlist hosts only
+ * - Page-parser sites (Instagram): no progressive network capture
+ */
 chrome.webRequest.onHeadersReceived.addListener(
   (details) => {
     if (details.tabId < 0) return;
     if (details.method && details.method !== 'GET') return;
+    if (details.initiator && details.initiator.startsWith('chrome-extension://')) return;
 
-    const url = details.url;
-    if (isYouTubeRelatedUrl(url)) return;
+    const rawUrl = details.url;
+    if (isYouTubeRelatedUrl(rawUrl) || isIgnoredNetworkUrl(rawUrl)) return;
+    if (details.initiator && isIgnoredNetworkUrl(details.initiator)) return;
+
+    const url = normalizeMediaUrl(rawUrl);
+    if (isYouTubeRelatedUrl(url) || isIgnoredNetworkUrl(url)) return;
 
     const headers = details.responseHeaders || [];
     const ctype = headers.find((h) => h.name.toLowerCase() === 'content-type')?.value;
@@ -171,7 +263,7 @@ chrome.webRequest.onHeadersReceived.addListener(
     if (!kind) return;
 
     const size = parseContentLength(clen);
-    if (kind === 'mp4' && size != null && size < 50_000) return;
+    if (isTooSmallMedia(size)) return;
 
     void (async () => {
       let pageUrl = '';
@@ -180,48 +272,34 @@ chrome.webRequest.onHeadersReceived.addListener(
         const tab = await chrome.tabs.get(details.tabId);
         pageUrl = tab.url || '';
         title = tab.title || 'video';
-        if (pageUrl && isYouTubeRelatedUrl(pageUrl)) return;
+        if (pageUrl && (isYouTubeRelatedUrl(pageUrl) || isIgnoredNetworkUrl(pageUrl))) return;
       } catch {
         return;
       }
 
-      const map = getTabMap(details.tabId);
-      // Drop leftovers from a previous document in this tab.
-      for (const [id, item] of map) {
-        if (item.pageUrl && pageUrl && !samePage(item.pageUrl, pageUrl)) {
-          map.delete(id);
-        }
-      }
+      // Instagram etc.: curated page parser only — skip progressive CDN noise.
+      if (kind !== 'm3u8' && isPageParserSite(pageUrl)) return;
 
-      const id = mediaId(details.tabId, url);
-      const prev = map.get(id);
+      if (kind === 'mp4' || kind === 'other') {
+        if (!isMp4NetworkAllowed(url)) return;
+      }
+      // m3u8: allowed globally (already passed ignore checks)
+
       const guessed =
         kind === 'mp4' || kind === 'm3u8' ? guessResolutionFromUrl(url) : {};
-      const width = prev?.width ?? guessed.width;
-      const height = prev?.height ?? guessed.height;
-      const item: CapturedMedia = {
-        id,
+      const item = await upsertMedia(details.tabId, {
         url,
-        tabId: details.tabId,
         pageUrl,
         title,
-        kind,
+        kind: kind === 'other' ? 'mp4' : kind,
         mime: ctype,
-        sizeBytes: size ?? prev?.sizeBytes,
-        width,
-        height,
-        capturedAt: Date.now(),
-        label:
-          height || width
-            ? formatResolutionLabel(width, height)
-            : kind === 'm3u8'
-              ? 'M3U8'
-              : 'MP4',
-      };
-      map.set(id, item);
-      await updateBadge(details.tabId);
+        sizeBytes: size,
+        width: guessed.width,
+        height: guessed.height,
+        source: 'network',
+      });
 
-      if (kind === 'm3u8') {
+      if (item.kind === 'm3u8') {
         void enrichM3u8Entry(item);
       }
     })();
@@ -230,56 +308,74 @@ chrome.webRequest.onHeadersReceived.addListener(
   ['responseHeaders'],
 );
 
+async function addPageMedia(
+  tabId: number,
+  pageUrl: string,
+  title: string,
+  links: PageMediaLink[],
+): Promise<void> {
+  if (!links.length) return;
+  if (pageUrl && (isYouTubeRelatedUrl(pageUrl) || isIgnoredNetworkUrl(pageUrl))) return;
+
+  // Instagram (and other page-parser sites): each push replaces prior page hits
+  // so delayed rescans after reel swipe don't stack old + new clips.
+  if (isPageParserSite(pageUrl)) {
+    const map = getTabMap(tabId);
+    for (const [id, item] of map) {
+      if (item.source === 'page') map.delete(id);
+    }
+  }
+
+  for (const link of links) {
+    if (!link.url || isYouTubeRelatedUrl(link.url) || isIgnoredNetworkUrl(link.url)) continue;
+    const kind = link.kind ?? detectMediaKind(link.url) ?? 'mp4';
+    if (kind === 'other') continue;
+    const guessed = guessResolutionFromUrl(link.url);
+    const item = await upsertMedia(tabId, {
+      url: link.url,
+      pageUrl,
+      title: link.title || title || 'video',
+      kind,
+      width: link.width ?? guessed.width,
+      height: link.height ?? guessed.height,
+      source: 'page',
+    });
+    if (item.kind === 'm3u8') void enrichM3u8Entry(item);
+  }
+}
+
+async function clearTabMedia(tabId: number): Promise<void> {
+  tabMedia.delete(tabId);
+  forgetEnrichment(tabId);
+  await updateBadge(tabId);
+}
+
+function notifyContentRescan(tabId: number): void {
+  chrome.tabs.sendMessage(tabId, { type: 'RESET_PAGE_SCAN' }, () => {
+    void chrome.runtime.lastError;
+  });
+}
+
 chrome.tabs.onRemoved.addListener((tabId) => {
   tabMedia.delete(tabId);
   forgetEnrichment(tabId);
 });
 
-/** Same tab navigated to another page → keep only the new page's captures. */
+/** Qooly-style: URL change → wipe list and tell page to scan again. */
 chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (!changeInfo.url) return;
+
   const pageUrl = changeInfo.url || tab.url || '';
   if (!pageUrl) return;
 
-  if (isYouTubeRelatedUrl(pageUrl)) {
-    tabMedia.delete(tabId);
-    forgetEnrichment(tabId);
-    void updateBadge(tabId);
+  if (isYouTubeRelatedUrl(pageUrl) || isIgnoredNetworkUrl(pageUrl)) {
+    void clearTabMedia(tabId);
     return;
   }
 
-  // URL change or load cycle: drop items that belong to a different document.
-  if (changeInfo.url || changeInfo.status === 'loading' || changeInfo.status === 'complete') {
-    const map = tabMedia.get(tabId);
-    if (!map || map.size === 0) return;
-    let removed = false;
-    for (const [id, item] of map) {
-      if (item.pageUrl && !samePage(item.pageUrl, pageUrl)) {
-        map.delete(id);
-        removed = true;
-      }
-    }
-    if (map.size === 0) {
-      tabMedia.delete(tabId);
-      forgetEnrichment(tabId);
-    }
-    if (removed) void updateBadge(tabId);
-  }
+  void clearTabMedia(tabId);
+  notifyContentRescan(tabId);
 });
-
-/** Compare document pages ignoring hash (hash-only changes keep list). */
-function samePage(a: string, b: string): boolean {
-  try {
-    const ua = new URL(a);
-    const ub = new URL(b);
-    return (
-      ua.origin === ub.origin &&
-      ua.pathname === ub.pathname &&
-      ua.search === ub.search
-    );
-  } catch {
-    return a === b;
-  }
-}
 
 async function openDownload(media: CapturedMedia): Promise<BgResponse> {
   if (isYouTubeRelatedUrl(media.url) || (media.pageUrl && isYouTubeRelatedUrl(media.pageUrl))) {
@@ -300,7 +396,58 @@ async function openDownload(media: CapturedMedia): Promise<BgResponse> {
   return { ok: true };
 }
 
-chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message: BgMessage, sender, sendResponse) => {
+  if (message.type === 'ADD_PAGE_MEDIA') {
+    const tabId = sender.tab?.id;
+    if (tabId == null || tabId < 0) {
+      sendResponse({ ok: false, error: 'no tab' } satisfies BgResponse);
+      return false;
+    }
+    void (async () => {
+      let pageUrl = sender.tab?.url || '';
+      let title = sender.tab?.title || 'video';
+      try {
+        const tab = await chrome.tabs.get(tabId);
+        pageUrl = tab.url || pageUrl;
+        title = tab.title || title;
+      } catch {
+        /* use sender */
+      }
+      await addPageMedia(tabId, pageUrl, title, message.links);
+      sendResponse({ ok: true } satisfies BgResponse);
+    })();
+    return true;
+  }
+
+  if (message.type === 'PAGE_NAVIGATED') {
+    const tabId = sender.tab?.id;
+    if (tabId != null && tabId >= 0) {
+      void clearTabMedia(tabId);
+    }
+    sendResponse({ ok: true } satisfies BgResponse);
+    return false;
+  }
+
+  if (message.type === 'RESYNC_TAB') {
+    void (async () => {
+      await clearTabMedia(message.tabId);
+      notifyContentRescan(message.tabId);
+      // Give content scripts a moment to push fresh links.
+      await new Promise((r) => setTimeout(r, 700));
+      let pageUrl = '';
+      try {
+        pageUrl = (await chrome.tabs.get(message.tabId)).url || '';
+      } catch {
+        /* ignore */
+      }
+      sendResponse({
+        ok: true,
+        items: listForTab(message.tabId, pageUrl || undefined),
+      } satisfies BgResponse);
+    })();
+    return true;
+  }
+
   if (message.type === 'GET_MEDIA_FOR_TAB') {
     void (async () => {
       let pageUrl = '';
@@ -325,9 +472,7 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
   }
 
   if (message.type === 'CLEAR_TAB') {
-    tabMedia.delete(message.tabId);
-    forgetEnrichment(message.tabId);
-    void updateBadge(message.tabId);
+    void clearTabMedia(message.tabId);
     sendResponse({ ok: true } satisfies BgResponse);
     return false;
   }
@@ -341,4 +486,4 @@ chrome.runtime.onMessage.addListener((message: BgMessage, _sender, sendResponse)
   return false;
 });
 
-console.info('[TubeBox] background ready');
+console.info('[TubeBox] background ready (qooly-aligned sniff)');

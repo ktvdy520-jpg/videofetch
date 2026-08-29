@@ -160,11 +160,16 @@ function render(items: CapturedMedia[]): void {
 
     const name = document.createElement('div');
     name.className = 'title';
-    try {
-      const base = new URL(item.url).pathname.split('/').pop() || item.title;
-      name.textContent = decodeURIComponent(base);
-    } catch {
-      name.textContent = item.title || 'video';
+    const niceTitle = (item.title || '').trim();
+    if (niceTitle && !/^video$/i.test(niceTitle) && !/^https?:/i.test(niceTitle)) {
+      name.textContent = niceTitle;
+    } else {
+      try {
+        const base = new URL(item.url).pathname.split('/').pop() || item.title;
+        name.textContent = decodeURIComponent(base);
+      } catch {
+        name.textContent = item.title || 'video';
+      }
     }
     name.title = item.url;
 
@@ -247,7 +252,22 @@ async function load(): Promise<void> {
   }
 }
 
-document.getElementById('refresh')!.addEventListener('click', () => void load());
+document.getElementById('refresh')!.addEventListener('click', async () => {
+  const tabId = await activeTabId();
+  if (tabId == null) {
+    render([]);
+    return;
+  }
+  previewId = null;
+  destroyPreviewPlayer();
+  tipEl.textContent = '正在从当前页面重新抓取…';
+  const res = await chrome.runtime.sendMessage({ type: 'RESYNC_TAB', tabId });
+  if (res?.ok && Array.isArray(res.items)) {
+    render(res.items as CapturedMedia[]);
+  } else {
+    await load();
+  }
+});
 document.getElementById('clear')!.addEventListener('click', async () => {
   const tabId = await activeTabId();
   if (tabId == null) return;
