@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TubeBox 下载</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="top">
+      <div class="brand">TubeBox</div>
+      <div class="sub">本地下载页 · 不上传服务器</div>
+    </header>
+
+    <section class="card">
+      <h1 id="title">准备下载</h1>
+      <p class="meta" id="meta"></p>
+      <p class="src" id="source"></p>
+
+      <div class="progress-wrap">
+        <div class="progress-bar"><div class="progress-fill" id="fill"></div></div>
+        <div class="progress-text" id="progressText">等待开始…</div>
+      </div>
+
+      <div class="actions">
+        <button type="button" class="btn primary" id="startBtn">开始下载</button>
+        <button type="button" class="btn ghost" id="cancelBtn" disabled>取消</button>
+        <a class="btn success hidden" id="saveLink" download>保存文件</a>
+      </div>
+
+      <p class="note" id="note"></p>
+      <pre class="log" id="log"></pre>
+    </section>
+
+    <aside class="ad" id="ad">
+      <div class="ad-label">广告位</div>
+      <div class="ad-body">可在此放置推广横幅（占位）</div>
+    </aside>
+
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

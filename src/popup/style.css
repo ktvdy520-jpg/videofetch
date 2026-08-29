@@ -1,0 +1,245 @@
+:root {
+  /* TomDown AppColors.primary / primaryDark */
+  --green: #10b981;
+  --green-dark: #059669;
+  --green-deep: #047857;
+  --green-soft: #ecfdf5;
+  --green-ring: rgba(16, 185, 129, 0.22);
+  --bg: #f3f4f6;
+  --card: #ffffff;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --danger: #ef4444;
+  --tip-bg: #ecfdf5;
+  --tip-border: #a7f3d0;
+  --tip-text: #065f46;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  width: 400px;
+  min-height: 240px;
+  max-height: 560px;
+  font-family: 'Segoe UI', system-ui, -apple-system, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 18px;
+  background: linear-gradient(135deg, #4ade80 0%, var(--green) 42%, var(--green-dark) 100%);
+  color: #fff;
+  box-shadow: 0 8px 24px rgba(16, 185, 129, 0.28);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.logo {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  background: linear-gradient(145deg, #ecfdf5, #fff);
+  box-shadow:
+    0 0 0 2px rgba(255, 255, 255, 0.35),
+    0 4px 10px rgba(0, 0, 0, 0.12);
+  position: relative;
+}
+
+.logo::after {
+  content: '';
+  position: absolute;
+  inset: 7px 8px 7px 10px;
+  background: var(--green-dark);
+  clip-path: polygon(0 0, 0 100%, 100% 50%);
+  border-radius: 1px;
+}
+
+.name {
+  font-weight: 800;
+  font-size: 18px;
+  letter-spacing: 0.02em;
+  text-shadow: 0 1px 0 rgba(0, 0, 0, 0.08);
+}
+
+.badge-count {
+  min-width: 28px;
+  height: 28px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.tip {
+  margin: 14px 14px 8px;
+  padding: 11px 13px;
+  background: var(--tip-bg);
+  border: 1px solid var(--tip-border);
+  border-radius: 12px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--tip-text);
+}
+
+.list {
+  padding: 6px 14px 10px;
+  overflow-y: auto;
+  max-height: 400px;
+}
+
+.empty {
+  padding: 40px 16px;
+  text-align: center;
+  color: var(--muted);
+  font-size: 14px;
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 16px;
+}
+
+.item {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px;
+  align-items: center;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 14px;
+  margin-bottom: 10px;
+  box-shadow: 0 4px 14px rgba(17, 24, 39, 0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.item:hover {
+  border-color: #a7f3d0;
+  box-shadow: 0 8px 22px var(--green-ring);
+}
+
+.meta {
+  min-width: 0;
+}
+
+.row-top {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+  flex-wrap: wrap;
+}
+
+.kind {
+  font-size: 12px;
+  font-weight: 800;
+  color: #fff;
+  background: linear-gradient(135deg, var(--green), var(--green-dark));
+  border-radius: 999px;
+  padding: 3px 10px;
+  letter-spacing: 0.02em;
+  box-shadow: 0 2px 8px var(--green-ring);
+}
+
+.size {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--muted);
+  background: #f3f4f6;
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.title {
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  line-height: 1.35;
+}
+
+.url {
+  font-size: 11.5px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 4px;
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 76px;
+}
+
+.btn {
+  border: none;
+  border-radius: 10px;
+  padding: 9px 12px;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.btn-dl {
+  background: linear-gradient(135deg, var(--green), var(--green-dark));
+  color: #fff;
+  box-shadow: 0 4px 12px var(--green-ring);
+}
+
+.btn-dl:hover {
+  background: linear-gradient(135deg, #34d399, var(--green-deep));
+}
+
+.btn-rm {
+  background: #fef2f2;
+  color: var(--danger);
+}
+
+.btn-rm:hover {
+  background: #fee2e2;
+}
+
+.footer {
+  display: flex;
+  justify-content: space-between;
+  padding: 12px 18px 14px;
+  border-top: 1px solid var(--border);
+  background: #fff;
+}
+
+.linkish {
+  background: none;
+  border: none;
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 0;
+}
+
+.linkish:hover {
+  color: var(--green-deep);
+  text-decoration: underline;
+}

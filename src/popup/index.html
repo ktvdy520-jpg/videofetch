@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>TubeBox</title>
+    <link rel="stylesheet" href="./style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <span class="name">TubeBox</span>
+      </div>
+      <span class="badge-count" id="count">0</span>
+    </header>
+    <div class="tip" id="tip">
+      播放页面视频后，本页捕获的媒体会出现在下方。点击「下载」打开本地下载页。不支持 YouTube。
+    </div>
+    <main class="list" id="list"></main>
+    <footer class="footer">
+      <button type="button" class="linkish" id="refresh">刷新列表</button>
+      <button type="button" class="linkish" id="clear">清空本页</button>
+    </footer>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>
