@@ -24,6 +24,21 @@ export const MP4_HOST_ALLOW_REGEX: readonly RegExp[] = [
   /^v\d+-xg-web-pc\.ixigua\.com$/i,
 ];
 
+/**
+ * Qooly: progressive Twitter CDN paths (pl/avc1 or pl/mp4a under video.twimg.com).
+ * Used when the page is x.com/twitter.com so page-parser sites can still sniff these.
+ */
+export function isTwitterTwimgProgressive(mediaUrl: string): boolean {
+  try {
+    const u = new URL(mediaUrl);
+    const host = u.hostname.toLowerCase();
+    if (host !== 'video.twimg.com' && !host.endsWith('.video.twimg.com')) return false;
+    return /\/pl\/(avc1|mp4a)\//i.test(u.pathname) || /\/avc1\/\d{3,4}x\d{3,4}\//i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
 /** Do not sniff network media when page or media URL matches these. */
 export const NETWORK_IGNORE_HOST_REGEX: readonly RegExp[] = [
   /(^|\.)youtube\.com$/i,
@@ -50,6 +65,16 @@ export const PAGE_PARSER_HOSTS: readonly string[] = [
   'ixigua.com',
   '928hd.tv',
   'showhd9.com',
+];
+
+/**
+ * Page parsers that keep only the latest push (SPA one-clip UX).
+ * Feed-style sites (Facebook, X, …) accumulate instead — like Qooly/4saved.
+ */
+export const PAGE_PARSER_REPLACE_HOSTS: readonly string[] = [
+  'instagram.com',
+  'cdninstagram.com',
+  'tiktok.com',
 ];
 
 /** Generic video / og:video content script should not run here. */
@@ -97,6 +122,13 @@ export function isPageParserSite(pageUrl: string): boolean {
   return hostMatchesList(host, PAGE_PARSER_HOSTS);
 }
 
+/** True when each page-media push should wipe prior page hits (IG/TikTok). */
+export function isPageParserReplaceSite(pageUrl: string): boolean {
+  const host = hostnameOf(pageUrl);
+  if (!host) return false;
+  return hostMatchesList(host, PAGE_PARSER_REPLACE_HOSTS);
+}
+
 /** Progressive MP4/webm network capture allowed for this media URL. */
 export function isMp4NetworkAllowed(mediaUrl: string): boolean {
   const host = hostnameOf(mediaUrl);
@@ -142,6 +174,13 @@ export function isTwitterPage(): boolean {
     host === 'x.com' ||
     host.endsWith('.x.com')
   );
+}
+
+/** True for X/Twitter document URL (background / network policy). */
+export function isTwitterSiteUrl(pageUrl: string): boolean {
+  const host = hostnameOf(pageUrl);
+  if (!host) return false;
+  return hostMatchesList(host, ['twitter.com', 'x.com']);
 }
 
 export function isBilibiliPage(): boolean {

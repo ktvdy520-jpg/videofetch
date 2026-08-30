@@ -6,6 +6,8 @@ import { normalizeMediaUrl } from '../shared/media';
 
 const fetched = new Set<string>();
 let navGeneration = 0;
+/** Address-bar / primary watch id (Qooly currentPostId). */
+let currentPostId: string | null = null;
 const MARK = 'tubebox-fb-seen';
 
 function getCookie(name: string): string | undefined {
@@ -14,35 +16,51 @@ function getCookie(name: string): string | undefined {
   return undefined;
 }
 
-function returnNumbers(raw: string): string[] {
-  return raw.match(/[\D]+(?=[_])|[\d]+_?[\d]+/g) || [];
+/** Prefer explicit ?v= via URLSearchParams (handles &rdid=… etc.). */
+function videoIdFromHref(href: string = location.href): string | null {
+  try {
+    const u = new URL(href, location.origin);
+    const v = u.searchParams.get('v');
+    if (v && /^\d+$/.test(v)) return v;
+
+    const videosPath = u.pathname.match(/\/videos\/(\d+)/i)?.[1];
+    if (videosPath) return videosPath;
+
+    const reelPath = u.pathname.match(/\/reels?\/(\d+)/i)?.[1];
+    if (reelPath) return reelPath;
+  } catch {
+    /* ignore */
+  }
+  return null;
 }
 
-function pickVideoIdFromText(raw: string): string | null {
-  const nums = returnNumbers(raw);
-  const id = nums.find((n) => /^\d+$/.test(n));
-  return id || null;
-}
-
-/** Qooly/4saved: ?v= /videos/ /reel(s)/ / data-video-id */
 function currentVideoId(): string | null {
-  const search = location.search.match(/\?v=(\d+)/i)?.[1];
-  if (search) return search;
-
-  const videosPath = location.pathname.match(/\/videos\/(\d+)/i)?.[1];
-  if (videosPath) return videosPath;
-
-  const reelPath = location.pathname.match(/\/reels?\/(\d+)/i)?.[1];
-  if (reelPath) return reelPath;
+  const fromUrl = videoIdFromHref();
+  if (fromUrl) return fromUrl;
 
   const el = document.querySelector('[data-video-id]') as HTMLElement | null;
   const fromDom = el?.dataset?.videoId;
   if (fromDom && /^\d+$/.test(fromDom)) return fromDom;
 
-  return pickVideoIdFromText(location.pathname + location.search);
+  return null;
+}
+
+function scrapeDtsgFromPage(): string | undefined {
+  const input = document.querySelector('input[name="fb_dtsg"]') as HTMLInputElement | null;
+  if (input?.value) return input.value;
+
+  const html = document.documentElement.innerHTML;
+  const m =
+    html.match(/"DTSGInitialData"\s*,\s*\[\s*\]\s*,\s*\{\s*"token"\s*:\s*"([^"]+)"/) ||
+    html.match(/"dtsg"\s*:\s*\{\s*"token"\s*:\s*"([^"]+)"/) ||
+    html.match(/fb_dtsg_ag["']?\s*[:=]\s*["']([^"']+)["']/);
+  return m?.[1];
 }
 
 async function resolveDtsg(): Promise<string | undefined> {
+  const fromPage = scrapeDtsgFromPage();
+  if (fromPage) return fromPage;
+
   try {
     const res = (await chrome.runtime.sendMessage({ type: 'GET_FB_DTSG' })) as {
       ok?: boolean;
@@ -52,10 +70,32 @@ async function resolveDtsg(): Promise<string | undefined> {
   } catch {
     /* ignore */
   }
-  return undefined;
+
+  // Qooly: wait briefly for an ajax request to expose fb_dtsg_ag.
+  await new Promise((r) => setTimeout(r, 1000));
+  try {
+    const res = (await chrome.runtime.sendMessage({ type: 'GET_FB_DTSG' })) as {
+      ok?: boolean;
+      dtsg?: string;
+    };
+    if (res?.ok && res.dtsg) return res.dtsg;
+  } catch {
+    /* ignore */
+  }
+  return scrapeDtsgFromPage();
 }
 
-async function fetchVideoData(videoId: string): Promise<PageMediaLink | null> {
+type FbPayload = {
+  hd_src?: string;
+  sd_src?: string;
+  hd_src_no_ratelimit?: string;
+  sd_src_no_ratelimit?: string;
+};
+
+async function fetchVideoData(
+  videoId: string,
+  isPrimary: boolean,
+): Promise<PageMediaLink | null> {
   const dtsg = await resolveDtsg();
   if (!dtsg) return null;
   const user = getCookie('c_user') || '';
@@ -66,25 +106,33 @@ async function fetchVideoData(videoId: string): Promise<PageMediaLink | null> {
   const res = await fetch(url, { credentials: 'include' });
   if (!res.ok) return null;
   const text = await res.text();
-  const data = JSON.parse(text.replace(/^for \(;;\);/, '')) as {
-    payload?: { hd_src?: string; sd_src?: string };
-  };
-  const src = data.payload?.hd_src || data.payload?.sd_src;
+  const data = JSON.parse(text.replace(/^for \(;;\);/, '')) as { payload?: FbPayload };
+  const p = data.payload;
+  const src =
+    p?.hd_src_no_ratelimit || p?.hd_src || p?.sd_src_no_ratelimit || p?.sd_src;
   if (!src || !/^https?:\/\//i.test(src)) return null;
+
+  const quality = p?.hd_src_no_ratelimit || p?.hd_src ? 'HD' : 'SD';
+  const title = isPrimary
+    ? (document.title || '').trim().slice(0, 80) || `video_${videoId}`
+    : `video_${videoId}`;
+
   return {
     url: normalizeMediaUrl(src),
-    title: `video_${videoId}`,
+    title,
     kind: kindFromUrl(src),
+    label: quality,
+    priority: isPrimary ? 0 : 10,
   };
 }
 
-async function resolveById(videoId: string): Promise<void> {
+async function resolveById(videoId: string, isPrimary = false): Promise<void> {
   if (!videoId || fetched.has(videoId)) return;
   fetched.add(videoId);
   const gen = navGeneration;
   let link: PageMediaLink | null = null;
   try {
-    link = await fetchVideoData(videoId);
+    link = await fetchVideoData(videoId, isPrimary || videoId === currentPostId);
   } catch {
     link = null;
   }
@@ -96,14 +144,15 @@ async function resolveById(videoId: string): Promise<void> {
   pushPageLinks([link]);
 }
 
+/** Qooly searchLinks: every /watch/?v= on the page. */
 function scanWatchLinks(): void {
-  for (const a of Array.from(document.querySelectorAll('a[href*="/watch"]'))) {
+  for (const a of Array.from(document.querySelectorAll('a[href*="watch"]'))) {
     if (a.classList.contains(MARK)) continue;
-    const href = (a as HTMLAnchorElement).href || '';
-    const m = href.match(/\/watch\/?\?v=(\d+)/i);
-    if (!m?.[1]) continue;
+    const href = (a as HTMLAnchorElement).href || a.getAttribute('href') || '';
+    const id = videoIdFromHref(href);
+    if (!id) continue;
     a.classList.add(MARK);
-    void resolveById(m[1]);
+    void resolveById(id, id === currentPostId);
   }
 }
 
@@ -112,21 +161,30 @@ function scanVideos(): void {
     if (video.classList.contains(MARK)) continue;
     video.classList.add(MARK);
     const id = currentVideoId();
-    if (id) void resolveById(id);
+    if (id) void resolveById(id, id === currentPostId);
   }
 }
 
 function softScan(): void {
   if (location.href.includes('instagram/login_sync')) return;
+
   const id = currentVideoId();
-  if (id) void resolveById(id);
-  if (/\/reels?\//i.test(location.pathname)) return;
+  currentPostId = id;
+
+  // Reels: only address-bar id (Qooly early-return).
+  if (/\/reels?\//i.test(location.pathname)) {
+    if (id) void resolveById(id, true);
+    return;
+  }
+
+  if (id) void resolveById(id, true);
   scanWatchLinks();
   scanVideos();
 }
 
 function resetState(): void {
   fetched.clear();
+  currentPostId = null;
   document.querySelectorAll('.' + MARK).forEach((el) => el.classList.remove(MARK));
 }
 

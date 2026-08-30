@@ -55,6 +55,17 @@ export default defineManifest({
         '*://*.x.com/*',
         '*://x.com/*',
       ],
+      js: ['src/content/twitter-main.ts'],
+      run_at: 'document_start',
+      world: 'MAIN',
+    },
+    {
+      matches: [
+        '*://*.twitter.com/*',
+        '*://twitter.com/*',
+        '*://*.x.com/*',
+        '*://x.com/*',
+      ],
       js: ['src/content/twitter.ts'],
       run_at: 'document_idle',
     },

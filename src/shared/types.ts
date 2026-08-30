@@ -15,6 +15,8 @@ export interface CapturedMedia {
   capturedAt: number;
   /** How the item was discovered. */
   source?: 'network' | 'page';
+  /** Lower sorts first (page parsers: 0 = primary / address-bar). */
+  priority?: number;
 }
 
 export interface PageMediaLink {
@@ -23,6 +25,9 @@ export interface PageMediaLink {
   kind?: MediaKind;
   width?: number;
   height?: number;
+  /** Lower sorts first in the popup (0 = address-bar / primary clip). */
+  priority?: number;
+  label?: string;
 }
 
 export interface DlQuery {

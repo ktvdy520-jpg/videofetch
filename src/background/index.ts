@@ -10,7 +10,10 @@ import {
 import {
   isIgnoredNetworkUrl,
   isMp4NetworkAllowed,
+  isPageParserReplaceSite,
   isPageParserSite,
+  isTwitterSiteUrl,
+  isTwitterTwimgProgressive,
 } from '../shared/sniff-rules';
 import { DEFAULT_IG_APP_ID } from '../shared/ig-shortcode';
 
@@ -94,6 +97,9 @@ function listForTab(tabId: number, pageUrl?: string): CapturedMedia[] {
     items = items.filter((it) => !it.pageUrl || samePage(it.pageUrl, pageUrl));
   }
   return items.sort((a, b) => {
+    const pa = a.priority ?? 50;
+    const pb = b.priority ?? 50;
+    if (pa !== pb) return pa - pb;
     const ha = a.height ?? 0;
     const hb = b.height ?? 0;
     if (hb !== ha) return hb - ha;
@@ -176,6 +182,7 @@ async function upsertMedia(
     source?: CapturedMedia['source'];
     id?: string;
     capturedAt?: number;
+    priority?: number;
   },
 ): Promise<CapturedMedia> {
   const url = normalizeMediaUrl(partial.url);
@@ -206,6 +213,7 @@ async function upsertMedia(
         : prev?.label) ??
       (partial.kind === 'm3u8' ? 'M3U8' : 'MP4'),
     source: partial.source ?? prev?.source ?? 'network',
+    priority: partial.priority ?? prev?.priority,
   };
   map.set(id, item);
   await updateBadge(tabId);
@@ -333,16 +341,33 @@ chrome.webRequest.onHeadersReceived.addListener(
         return;
       }
 
-      // Instagram etc.: curated page parser only — skip progressive CDN noise.
-      if (kind !== 'm3u8' && isPageParserSite(pageUrl)) return;
+      // Page-parser sites: skip blanket progressive CDN noise.
+      // X/Twitter exception (Qooly): still sniff video.twimg.com pl/avc1|mp4a MP4s; never M3U8.
+      if (isPageParserSite(pageUrl)) {
+        if (isTwitterSiteUrl(pageUrl)) {
+          if (kind === 'm3u8') return;
+          if (kind === 'mp4' || kind === 'other') {
+            if (!isTwitterTwimgProgressive(url)) return;
+          } else {
+            return;
+          }
+        } else if (kind !== 'm3u8') {
+          return;
+        }
+      }
 
       if (kind === 'mp4' || kind === 'other') {
-        if (!isMp4NetworkAllowed(url)) return;
+        if (!isMp4NetworkAllowed(url) && !isTwitterTwimgProgressive(url)) return;
       }
-      // m3u8: allowed globally (already passed ignore checks)
+      // m3u8: allowed globally except Twitter (handled above)
 
       const guessed =
         kind === 'mp4' || kind === 'm3u8' ? guessResolutionFromUrl(url) : {};
+      const twimg = isTwitterSiteUrl(pageUrl) && isTwitterTwimgProgressive(url);
+      // Match Qooly: label from avc1 width (e.g. 720p); missing → n/a
+      const avc = twimg ? /avc1\/(\d{3,4})x(\d{3,4})/i.exec(url) : null;
+      const twWidth = avc ? Number(avc[1]) : guessed.width;
+      const twHeight = avc ? Number(avc[2]) : guessed.height;
       const item = await upsertMedia(details.tabId, {
         url,
         pageUrl,
@@ -350,8 +375,10 @@ chrome.webRequest.onHeadersReceived.addListener(
         kind: kind === 'other' ? 'mp4' : kind,
         mime: ctype,
         sizeBytes: size,
-        width: guessed.width,
-        height: guessed.height,
+        width: twWidth ?? guessed.width,
+        height: twHeight ?? guessed.height,
+        label: twimg ? (twWidth ? `${twWidth}p` : 'n/a') : undefined,
+        priority: twimg ? (twWidth ? Math.max(0, 4000 - twWidth) : 90) : undefined,
         source: 'network',
       });
 
@@ -373,9 +400,9 @@ async function addPageMedia(
   if (!links.length) return;
   if (pageUrl && (isYouTubeRelatedUrl(pageUrl) || isIgnoredNetworkUrl(pageUrl))) return;
 
-  // Instagram (and other page-parser sites): each push replaces prior page hits
-  // so delayed rescans after reel swipe don't stack old + new clips.
-  if (isPageParserSite(pageUrl)) {
+  // IG/TikTok: replace prior page hits so reel swipe doesn't stack clips.
+  // Facebook/X/etc.: accumulate like Qooly (related watch links stay in list).
+  if (isPageParserReplaceSite(pageUrl)) {
     const map = getTabMap(tabId);
     for (const [id, item] of map) {
       if (item.source === 'page') map.delete(id);
@@ -394,6 +421,8 @@ async function addPageMedia(
       kind,
       width: link.width ?? guessed.width,
       height: link.height ?? guessed.height,
+      label: link.label,
+      priority: link.priority,
       source: 'page',
     });
     if (item.kind === 'm3u8') void enrichM3u8Entry(item);
@@ -514,26 +543,28 @@ async function fetchTwitterVideoLinks(
   const variants = tweet?.extended_entities?.media?.[0]?.video_info?.variants || [];
   const title = (tweet?.full_text || 'twitter video').slice(0, 80);
   const mp4s = variants
-    .filter((v) => v.url && v.content_type?.includes('mp4'))
+    .filter((v) => {
+      if (!v.url || !/^https?:\/\//i.test(v.url)) return false;
+      return v.content_type !== 'application/x-mpegURL';
+    })
     .map((v) => {
-      const m = v.url!.match(/(\d{3,4})x(\d{3,4})/);
+      const m = v.url!.match(/avc1\/(\d{3,4})x(\d{3,4})/);
       const width = m ? Number(m[1]) : undefined;
       const height = m ? Number(m[2]) : undefined;
       return {
         url: normalizeMediaUrl(v.url!),
         title,
-        kind: 'mp4' as const,
+        kind: (/\.m3u8(\?|#|$)/i.test(v.url!) ? 'm3u8' : 'mp4') as 'mp4' | 'm3u8',
         width,
         height,
+        label: width ? `${width}p` : 'n/a',
+        priority: width ? Math.max(0, 4000 - width) : 90,
         bitrate: v.bitrate || 0,
       };
     })
     .sort((a, b) => (b.width || 0) - (a.width || 0) || b.bitrate - a.bitrate);
 
-  // Prefer single best quality (page-parser list replaces on each push).
-  const best = mp4s[0];
-  if (!best) return [];
-  return [{ url: best.url, title: best.title, kind: best.kind, width: best.width, height: best.height }];
+  return mp4s.map(({ bitrate: _b, ...link }) => link);
 }
 
 chrome.runtime.onMessage.addListener((message: BgMessage, sender, sendResponse) => {
