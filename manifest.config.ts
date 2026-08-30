@@ -19,7 +19,7 @@ export default defineManifest({
     service_worker: 'src/background/index.ts',
     type: 'module',
   },
-  permissions: ['storage', 'tabs', 'webRequest'],
+  permissions: ['storage', 'tabs', 'webRequest', 'downloads'],
   host_permissions: ['http://*/*', 'https://*/*'],
   content_scripts: [
     {

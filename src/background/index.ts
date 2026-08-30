@@ -1,5 +1,11 @@
 import type { BgMessage, BgResponse, CapturedMedia, PageMediaLink } from '../shared/types';
-import { detectMediaKind, isTooSmallMedia, mediaId, normalizeMediaUrl } from '../shared/media';
+import {
+  detectMediaKind,
+  guessFilename,
+  isTooSmallMedia,
+  mediaId,
+  normalizeMediaUrl,
+} from '../shared/media';
 import { isYouTubeRelatedUrl } from '../shared/youtube';
 import { buildWebDlPageUrl, DEFAULT_WEB_DL_URL } from '../shared/dl-url';
 import {
@@ -462,11 +468,36 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   notifyContentRescan(tabId);
 });
 
+function progressiveDownloadFilename(media: CapturedMedia): string {
+  const parts = [media.title || 'video'];
+  if (media.label && !/^(MP4|M3U8)$/i.test(media.label)) {
+    parts.push(media.label);
+  }
+  return guessFilename(parts.join(' '), 'mp4', media.url);
+}
+
 async function openDownload(media: CapturedMedia): Promise<BgResponse> {
   if (isYouTubeRelatedUrl(media.url) || (media.pageUrl && isYouTubeRelatedUrl(media.pageUrl))) {
     return { ok: false, error: '不支持 YouTube 相关链接' };
   }
 
+  // Progressive MP4: extension downloads API (avoids GitHub Pages CORS / CDN hotlink 403).
+  if (media.kind !== 'm3u8') {
+    try {
+      await chrome.downloads.download({
+        url: media.url,
+        filename: progressiveDownloadFilename(media),
+        conflictAction: 'uniquify',
+        saveAs: false,
+      });
+      return { ok: true };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false, error: msg || '下载失败' };
+    }
+  }
+
+  // M3U8 / HLS: still need in-browser remux page.
   let pageBase = DEFAULT_WEB_DL_URL;
   try {
     const data = await chrome.storage.sync.get('downloadBaseUrl');
